@@ -68,20 +68,13 @@ class Layer:
             
             del gcode_lines[start_index]
 
-    def coords_to_instructions(self,shapes, extrude = True):
-        x_coords = []
-        y_coords = []
-        for poly in shapes:
-            if not hasattr(poly,'exterior'):
-                Logger.log("d","No exterior found")
-                continue
-            xs,ys = poly.exterior.xy
-            x_coords.append(list(xs))
-            y_coords.append(list(ys))
-
+    def coords_to_instructions(self,coordinate_sets, extrude = True):
+        #Coordinate sets: 2d tuple of coordinates, representing different 'islands' of geometry
         instructions = []
-        for i in range(len(x_coords)-1):
-            for j in range(len(x_coords[i])-1):
+        for i in range(0,len(coordinate_sets)):
+            for j in range(0,len(coordinate_sets[i])):
+
+                coordinate = coordinate_sets[i][j]
 
                 if extrude and j > 0:
                     E = 0
@@ -89,13 +82,16 @@ class Layer:
                     layerHeight = Application.getInstance().getGlobalContainerStack().getProperty("layer_height", "value")
                     extruderDiameter = Application.getInstance().getGlobalContainerStack().getProperty("machine_nozzle_size", "value")
 
-                    distance = ((x_coords[i][j]-x_coords[i][j-1])**2 + (y_coords[i][j]-y_coords[i][j-1])**2)**0.5
+                    dx = coordinate_sets[i][j][0] - coordinate_sets[i][j-1][0]
+                    dy = coordinate_sets[i][j][1] - coordinate_sets[i][j-1][1]
+
+                    distance = (dx)**2 + (dy**2)**0.5
 
                     E = (4 * layerHeight * distance) / (3.1415 * extruderDiameter) #SOURCE https://3dprinting.stackexchange.com/questions/6289/how-is-the-e-argument-calculated-for-a-given-g1-command
 
-                    ins = "G1 X" + str(x_coords[i][j]) + " Y" + str(y_coords[i][j]) + " E" + str(E) + "\n"
+                    ins = "G1 X" + str(coordinate[0]) + " Y" + str(coordinate[1]) + " E" + str(E) + "\n"
                 else:
-                    ins = "G1 X" + str(x_coords[i][j]) + " Y" + str(y_coords[i][j]) + "\n"
+                    ins = "G1 X" + str(coordinate[0]) + " Y" + str(coordinate[1]) + "\n"
                 instructions.append(ins)
 
             #INSERT TRAVEL HERE?
@@ -114,40 +110,26 @@ class Layer:
         subtractive_polys = []
 
         lineWidth = Application.getInstance().getGlobalContainerStack().getProperty("line_width", "value")
+        
+        add_coordinates_set = []
+        sub_coordinates_set = []
 
+        
         for polygon in self.polygons:
-            subtractive_polys.append(polygon.buffer(distance))
-            additive_polys.append(polygon.buffer(lineWidth))
+            additive_polygon = polygon.buffer(lineWidth)
+            subtractive_polygon = polygon.buffer(float(distance))
 
-        #DEBUGGING!
-        if debug:
-            debug_layer_count += 1
+            additive_coords = list(additive_polygon.exterior.coords)
+            add_coordinates_set.append(additive_coords)
 
-            if debug_layer_count == debug_layer:
-                try:
-                    fig, (axs1,axs2) = plt.subplots(1,2)
+            subtractive_coords = list(subtractive_polygon.exterior.coords)
+            sub_coordinates_set.append(subtractive_coords)
 
-                    axs1.title.set_text("Polygon Original")
-                    axs2.title.set_text("Polygon Buffered")
+        Logger.log("d","additive coords = " +str(add_coordinates_set))
+        Logger.log("d","subtractive coords = " +str(sub_coordinates_set))
 
-                    #axs1.title.set_x("mm")
-                    #axs1.title.set_y("mm")
-
-                    #axs2.title.set_x("mm")
-                    #axs2.title.set_y("mm")
-
-                    p = gpd.GeoSeries(unary_union(self.polygons))
-                    p.plot(ax=axs1)
-                    plt.show()
-                    p = gpd.GeoSeries(unary_union(subtractive_polys))
-                    p.plot(ax=axs2)
-                    plt.show()
-                except:
-                    Message(traceback.format_exc(), title = "Plot Exception").show()
-        #END OF DEBUGGING
-
-        add_instructions = self.coords_to_instructions(additive_polys)
-        sub_instructions = self.coords_to_instructions(subtractive_polys,extrude=False)
+        add_instructions = self.coords_to_instructions(add_coordinates_set,extrude=True)
+        sub_instructions = self.coords_to_instructions(sub_coordinates_set,extrude=False)
 
         #Logger.log("d","Number of coordinates = "+str(len(instructions))) Not there yet
         #Logger.log("d","Number of sub instructions = "+str(len(sub_instructions)))
@@ -205,20 +187,6 @@ class ASMBL_Processing(Script):
                     "description": "Feedrate for the Extra Wall",
                     "type": "int",
                     "default_value": "3000"
-                },
-                "DebugEnabled":
-                {
-                    "label": "Debug Mode",
-                    "description": "Is debug mode on?",
-                    "type": "bool",
-                    "default_value": "False"
-                },
-                "DebugLayer":
-                {
-                    "label": "Visualised Layer Number",
-                    "description": "Which layer the debugger should display",
-                    "type": "int",
-                    "default_value": "5"
                 }
             }
         }"""
@@ -266,3 +234,37 @@ class ASMBL_Processing(Script):
         Message("ASMBL Processing Complete", title = "Status").show()
 
         return data
+
+
+#
+#for polygon in self.polygons:
+#            subtractive_polys.append(polygon.buffer(distance))
+#            additive_polys.append(polygon.buffer(lineWidth))
+#            
+#
+#        #DEBUGGING!
+#        if debug:
+#            debug_layer_count += 1#
+
+#            if debug_layer_count == debug_layer:
+#                try:
+#                    fig, (axs1,axs2) = plt.subplots(1,2)
+
+#                    axs1.title.set_text("Polygon Original")
+#                    axs2.title.set_text("Polygon Buffered")
+
+#                    #axs1.title.set_x("mm")
+#                    #axs1.title.set_y("mm")
+
+#                    #axs2.title.set_x("mm")
+#                    #axs2.title.set_y("mm")
+
+#                    p = gpd.GeoSeries(unary_union(self.polygons))
+#                    p.plot(ax=axs1)
+#                    plt.show()
+#                    p = gpd.GeoSeries(unary_union(subtractive_polys))
+#                    p.plot(ax=axs2)
+#                    plt.show()
+#                except:
+#                    Message(traceback.format_exc(), title = "Plot Exception").show()
+        #END OF DEBUGGING
