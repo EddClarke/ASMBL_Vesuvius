@@ -19,11 +19,9 @@ from shapely.ops import unary_union
 
 import numpy as np
 
-try:
-    import matplotlib.pyplot as plt
-    import geopandas as gpd
-except:
-    Message(traceback.format_exc(), title = "Exception").show()
+import matplotlib.pyplot as plt
+import geopandas as gpd
+
 
 debug_layer_count = 0
 
@@ -76,7 +74,9 @@ class Layer:
 
                 coordinate = coordinate_sets[i][j]
 
-                if extrude and j > 0:
+                dp = 5
+
+                if extrude and j > 1:
                     E = 0
 
                     layerHeight = Application.getInstance().getGlobalContainerStack().getProperty("layer_height", "value")
@@ -89,9 +89,9 @@ class Layer:
 
                     E = (4 * layerHeight * distance) / (3.1415 * extruderDiameter) #SOURCE https://3dprinting.stackexchange.com/questions/6289/how-is-the-e-argument-calculated-for-a-given-g1-command
 
-                    ins = "G1 X" + str(coordinate[0]) + " Y" + str(coordinate[1]) + " E" + str(E) + "\n"
+                    ins = "G1 X" + str(round(coordinate[0],dp)) + " Y" + str(round(coordinate[1],dp)) + " E" + str(round(E,dp)) + "\n"
                 else:
-                    ins = "G1 X" + str(coordinate[0]) + " Y" + str(coordinate[1]) + "\n"
+                    ins = "G1 X" + str(round(coordinate[0],dp)) + " Y" + str(round(coordinate[1],dp)) + "\n"
                 instructions.append(ins)
 
             #INSERT TRAVEL HERE?
@@ -174,6 +174,20 @@ class ASMBL_Processing(Script):
                     "type": "int",
                     "default_value": "3000"
                 },
+                "Retraction":
+                {
+                    "label": "Retraction Distance",
+                    "description": "Amount to retract when subtractive tool takes over",
+                    "type": "float",
+                    "default_value": "6.5"
+                },
+                "RetractionFeedrate":
+                {
+                    "label": "Retraction Feedrate",
+                    "description": "Feedrate during retraction",
+                    "type": "int",
+                    "default_value": "1200"
+                },
                 "AdditiveEnabled":
                 {
                     "label": "Extra Additive Layer Enabled",
@@ -209,27 +223,36 @@ class ASMBL_Processing(Script):
 
                 new_instructions = ""
 
+                new_instructions += ""
+
                 if self.getSettingValueByKey("AdditiveEnabled"):
-                    new_instructions += "G1 F"+str(self.getSettingValueByKey("AdditiveFeedrate"))+";VESUVIUS EXTRA WALL\n"
+                    new_instructions += ";VESUVIUS EXTRA WALL\n"
+                    new_instructions += "G1 F"+str(self.getSettingValueByKey("AdditiveFeedrate"))+"n"
 
                     for ins in add_instructions:
                         new_instructions += ins
 
                     new_instructions += ";END OF VESUVIUS EXTRA WALL\n"
+                
 
                 if self.getSettingValueByKey("SubtractiveEnabled"):
-                    new_instructions += "T1;VESUVIUS SUBTRACTIVE\n"
-                    new_instructions += "G1 F"+str(self.getSettingValueByKey("SubtractiveFeedrate"))+"\n"                
+                    new_instructions += ";VESUVIUS SUBTRACTIVE\n"
+                    new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E-"+str(self.getSettingValueByKey("Retraction"))+"\n"
+                    new_instructions += "G0 F15000\n"
+                    new_instructions += "T1\n"
+                    new_instructions += "G1 F"+str(self.getSettingValueByKey("SubtractiveFeedrate"))+"\n"              
 
                     for ins in sub_instructions:
                         new_instructions += ins
 
                     new_instructions += "T0;END OF VESUVIUS SUBTRACTIVE\n"
+                    new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E"+str(self.getSettingValueByKey("Retraction"))+"\n"          
 
                 data[i] += new_instructions
 
         except Exception as e:
             Message(traceback.format_exc(), title = "Exception").show()
+            Logger.log("d",traceback.format_exc())
 
         Message("ASMBL Processing Complete", title = "Status").show()
 
