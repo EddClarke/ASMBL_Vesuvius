@@ -62,7 +62,14 @@ class Layer:
                 move_instructions.append(MoveInstruction(gcode_lines[i]))
 
             p = lambda arr: [(instruction.x, instruction.y) for instruction in arr]
-            self.polygons.append(geometry.Polygon(p(move_instructions)))
+
+            new_poly = geometry.Polygon(p(move_instructions))
+
+            if type(new_poly) == geometry.MultiPolygon:
+                for poly in list(new_poly):
+                    self.polygons.append(poly)
+            else:
+                self.polygons.append(new_poly)
             
             del gcode_lines[start_index]
 
@@ -106,8 +113,8 @@ class Layer:
     def expand(self, distance):
         global debug_layer_count
 
-        additive_polys = []
-        subtractive_polys = []
+        #additive_polys = []
+        #subtractive_polys = []
 
         lineWidth = Application.getInstance().getGlobalContainerStack().getProperty("line_width", "value")
         
@@ -119,11 +126,24 @@ class Layer:
             additive_polygon = polygon.buffer(lineWidth)
             subtractive_polygon = polygon.buffer(float(distance))
 
-            additive_coords = list(additive_polygon.exterior.coords)
+            if type(additive_polygon) == geometry.MultiPolygon:
+                additive_coords = []
+                for poly in additive_polygon:
+                    additive_coords += list(poly.exterior.coords)
+            else:
+                additive_coords = list(additive_polygon.exterior.coords)
             add_coordinates_set.append(additive_coords)
 
-            subtractive_coords = list(subtractive_polygon.exterior.coords)
+
+            if type(subtractive_polygon) == geometry.MultiPolygon:
+                subtractive_coords = []
+                for poly in subtractive_polygon:
+                    subtractive_coords += list(poly.exterior.coords)
+            else:
+                subtractive_coords = list(subtractive_polygon.exterior.coords)
             sub_coordinates_set.append(subtractive_coords)
+
+            
 
         Logger.log("d","additive coords = " +str(add_coordinates_set))
         Logger.log("d","subtractive coords = " +str(sub_coordinates_set))
@@ -153,23 +173,37 @@ class ASMBL_Processing(Script):
             "version": 2,
             "settings":
             {
+                "ASMBL_Start":
+                {
+                    "label": "ASMBL Start Layer",
+                    "description": "After this layer is reached, the layers following shall be ASMBL processed",
+                    "type": "int",
+                    "default_value": "5"
+                },
+                "PauseAtASMBL_Start":
+                {
+                    "label": "Pause at ASMBL Start?",
+                    "description": "When set, the printer pauses when it reaches the ASMBL Start Layer",
+                    "type": "bool",
+                    "default_value": "True"
+                },
                 "SubtractiveEnabled":
                 {
-                    "label": "Subtractive Tool Enabled",
-                    "description": "Enables or disables the subtractive tool",
+                    "label": "Generate Subtractive Toolpath",
+                    "description": "When enabled, a toolpath for the subtractive tool is generated",
                     "type": "bool",
                     "default_value": "True"
                 },
                 "SubtractivePerimeter":
                 {
-                    "label": "Subtractive Tool Perimeter",
+                    "label": "Subtractive Tool Distance (mm)",
                     "description": "Distance the subtractive tool shall maintain from the model",
                     "type": "float",
                     "default_value": "3.5"
                 },
                 "SubtractiveFeedrate":
                 {
-                    "label": "Subtractive Feed Rate",
+                    "label": "Subtractive Feed Rate (mm/min)",
                     "description": "Feedrate for the Subtractive Tool",
                     "type": "int",
                     "default_value": "3000"
@@ -183,22 +217,22 @@ class ASMBL_Processing(Script):
                 },
                 "RetractionFeedrate":
                 {
-                    "label": "Retraction Feedrate",
+                    "label": "Retraction Feedrate (mm/min)",
                     "description": "Feedrate during retraction",
                     "type": "int",
                     "default_value": "1200"
                 },
                 "AdditiveEnabled":
                 {
-                    "label": "Extra Additive Layer Enabled",
-                    "description": "Enables or disables the additional additive layer",
+                    "label": Generate Extra Outer Shell",
+                    "description": "When enabled, an additional shell will be deposited on the outside of the model",
                     "type": "bool",
                     "default_value": "False"
                 },
                 "AdditiveFeedrate":
                 {
-                    "label": "Additive Feed Rate",
-                    "description": "Feedrate for the Extra Wall",
+                    "label": "Extra Shell Feedrate (mm/min)",
+                    "description": "Feedrate for the Extra Shell",
                     "type": "int",
                     "default_value": "3000"
                 }
@@ -211,9 +245,10 @@ class ASMBL_Processing(Script):
         debug = self.getSettingValueByKey("DebugEnabled")
         debug_layer = self.getSettingValueByKey("DebugLayer")
         
-        debug_layer_count = 0
+        layer_no = 0
         try:
             for i in range(2,len(data)-1):
+                layer_no += 1
                 layer = Layer(data[i])
 
                 buffer_distance = self.getSettingValueByKey("SubtractivePerimeter")
@@ -221,13 +256,19 @@ class ASMBL_Processing(Script):
 
                 #Logger.log("d", "Sub instructions (execute!) = " + str(sub_instructions))
 
-                new_instructions = ""
+                Logger.log("d",self.getSettingValueByKey("ASMBL_Start"))
 
-                new_instructions += ""
+
+                if layer_no <= int(self.getSettingValueByKey("ASMBL_Start")):
+                    if layer_no == self.getSettingValueByKey("ASMBL_Start") and self.getSettingValueByKey("PauseAtASMBL_Start"): 
+                        data[i] += "\nM601 ; Pause at ASMBL Start\n"
+                    continue
+
+                new_instructions = ""
 
                 if self.getSettingValueByKey("AdditiveEnabled"):
                     new_instructions += ";VESUVIUS EXTRA WALL\n"
-                    new_instructions += "G1 F"+str(self.getSettingValueByKey("AdditiveFeedrate"))+"n"
+                    new_instructions += "G1 F"+str(self.getSettingValueByKey("AdditiveFeedrate"))+"\n"
 
                     for ins in add_instructions:
                         new_instructions += ins
@@ -237,7 +278,9 @@ class ASMBL_Processing(Script):
 
                 if self.getSettingValueByKey("SubtractiveEnabled"):
                     new_instructions += ";VESUVIUS SUBTRACTIVE\n"
+                    new_instructions += "G92 E0\n"
                     new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E-"+str(self.getSettingValueByKey("Retraction"))+"\n"
+                    new_instructions += "G92 E0\n"
                     new_instructions += "G0 F15000\n"
                     new_instructions += "T1\n"
                     new_instructions += "G1 F"+str(self.getSettingValueByKey("SubtractiveFeedrate"))+"\n"              
@@ -246,7 +289,9 @@ class ASMBL_Processing(Script):
                         new_instructions += ins
 
                     new_instructions += "T0;END OF VESUVIUS SUBTRACTIVE\n"
+                    new_instructions += "G92 E0\n"
                     new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E"+str(self.getSettingValueByKey("Retraction"))+"\n"          
+                    new_instructions += "G92 E0\n"
 
                 data[i] += new_instructions
 
