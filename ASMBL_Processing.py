@@ -224,7 +224,7 @@ class ASMBL_Processing(Script):
                 },
                 "AdditiveEnabled":
                 {
-                    "label": Generate Extra Outer Shell",
+                    "label": "Generate Extra Outer Shell",
                     "description": "When enabled, an additional shell will be deposited on the outside of the model",
                     "type": "bool",
                     "default_value": "False"
