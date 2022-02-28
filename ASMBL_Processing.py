@@ -1,12 +1,7 @@
 # Copyright (c) 2017 Ruben Dulek
 # The PostProcessingPlugin is released under the terms of the AGPLv3 or higher.
 
-from io import BufferedRandom
-import re #To perform the search and replace.
 import traceback
-import sys
-
-from shapely.geometry import multipolygon
 
 from ..Script import Script
 from UM.Message import Message
@@ -15,12 +10,12 @@ from UM.Logger import Logger
 from UM.Application import Application
 
 from shapely import geometry
-from shapely.ops import unary_union
+#from shapely.ops import unary_union
 
-import numpy as np
+#import numpy as np
 
-import matplotlib.pyplot as plt
-import geopandas as gpd
+#import matplotlib.pyplot as plt
+#import geopandas as gpd
 
 
 debug_layer_count = 0
@@ -101,61 +96,32 @@ class Layer:
                     ins = "G1 X" + str(round(coordinate[0],dp)) + " Y" + str(round(coordinate[1],dp)) + "\n"
                 instructions.append(ins)
 
-            #INSERT TRAVEL HERE?
-
-        #Logger.log("d","Number of coordinates = "+str(len(instructions))) Not there yet
-        Logger.log("d","Number of instructions = "+str(len(instructions)))
-        Logger.log("d","Instructions (return of coords_to_instructions) = "+str(instructions))
-
-
         return instructions
 
-    def expand(self, distance):
+    def expand(self, distance, extrude=False):
         global debug_layer_count
 
-        #additive_polys = []
-        #subtractive_polys = []
-
-        lineWidth = Application.getInstance().getGlobalContainerStack().getProperty("line_width", "value")
+        #lineWidth = Application.getInstance().getGlobalContainerStack().getProperty("line_width", "value")
         
-        add_coordinates_set = []
-        sub_coordinates_set = []
+        coordinates_set = []
 
         
         for polygon in self.polygons:
-            additive_polygon = polygon.buffer(lineWidth)
-            subtractive_polygon = polygon.buffer(float(distance))
+            buff_polygon = polygon.buffer(float(distance))
 
-            if type(additive_polygon) == geometry.MultiPolygon:
-                additive_coords = []
-                for poly in additive_polygon:
-                    additive_coords += list(poly.exterior.coords)
+            if type(buff_polygon) == geometry.MultiPolygon:
+                buff_coords = []
+                for poly in buff_polygon:
+                    buff_coords += list(poly.exterior.coords)
             else:
-                additive_coords = list(additive_polygon.exterior.coords)
-            add_coordinates_set.append(additive_coords)
+                buff_coords = list(buff_polygon.exterior.coords)
 
-
-            if type(subtractive_polygon) == geometry.MultiPolygon:
-                subtractive_coords = []
-                for poly in subtractive_polygon:
-                    subtractive_coords += list(poly.exterior.coords)
-            else:
-                subtractive_coords = list(subtractive_polygon.exterior.coords)
-            sub_coordinates_set.append(subtractive_coords)
+            coordinates_set.append(buff_coords)
 
             
+        instructions = self.coords_to_instructions(coordinates_set,extrude)
 
-        Logger.log("d","additive coords = " +str(add_coordinates_set))
-        Logger.log("d","subtractive coords = " +str(sub_coordinates_set))
-
-        add_instructions = self.coords_to_instructions(add_coordinates_set,extrude=True)
-        sub_instructions = self.coords_to_instructions(sub_coordinates_set,extrude=False)
-
-        #Logger.log("d","Number of coordinates = "+str(len(instructions))) Not there yet
-        #Logger.log("d","Number of sub instructions = "+str(len(sub_instructions)))
-        #Logger.log("d","Sub Instructions (return of expand) = "+str(sub_instructions))
-
-        return add_instructions,sub_instructions
+        return instructions
 
 
 class ASMBL_Processing(Script):
@@ -187,57 +153,64 @@ class ASMBL_Processing(Script):
                     "type": "bool",
                     "default_value": "True"
                 },
-                "SubtractiveEnabled":
+                "BurnishingEnabled":
                 {
-                    "label": "Generate Subtractive Toolpath",
-                    "description": "When enabled, a toolpath for the subtractive tool is generated",
+                    "label": "Generate Burnisher Toolpath",
+                    "description": "When enabled, a toolpath for the burnishing tool is generated",
                     "type": "bool",
                     "default_value": "True"
                 },
-                "SubtractivePerimeter":
+                "BurnishingDiameter":
                 {
-                    "label": "Subtractive Tool Distance (mm)",
-                    "description": "Distance the subtractive tool shall maintain from the model",
+                    "label": "Burnishing Tool Diameter (mm)",
+                    "description": "Diameter of the burnishing tool end effector",
                     "type": "float",
-                    "default_value": "3.5"
+                    "default_value": "20"
                 },
-                "SubtractiveFeedrate":
+                "BurnishingFeedrate":
                 {
-                    "label": "Subtractive Feed Rate (mm/min)",
-                    "description": "Feedrate for the Subtractive Tool",
+                    "label": "Burnishing Tool Feed rate (mm/min)",
+                    "description": "Feed rate of the burnishing toolpath",
                     "type": "int",
-                    "default_value": "3000"
+                    "default_value": "1500"
                 },
-                "Retraction":
+                "BurnishingOffset":
                 {
-                    "label": "Retraction Distance",
-                    "description": "Amount to retract when subtractive tool takes over",
+                    "label": "Burnishing Tool Offset (mm)",
+                    "description": "Offset of the burnishing toolpath",
                     "type": "float",
-                    "default_value": "6.5"
+                    "default_value": "0"
                 },
-                "RetractionFeedrate":
+                "BurnishingTemperature":
                 {
-                    "label": "Retraction Feedrate (mm/min)",
-                    "description": "Feedrate during retraction",
-                    "type": "int",
-                    "default_value": "1200"
+                    "label": "Burnishing Tool Temperature (Celsius)",
+                    "description": "Temperature of the burnishing tool",
+                    "type": "float",
+                    "default_value": "200"
                 },
-                "AdditiveEnabled":
+                "BurnishingStepHeight":
                 {
-                    "label": "Generate Extra Outer Shell",
-                    "description": "When enabled, an additional shell will be deposited on the outside of the model",
+                    "label": "Burnishing Tool Step Height (mm)",
+                    "description": "Step Height of the burnishing tool",
+                    "type": "float",
+                    "default_value": "1"
+                },
+                "RemovePrintCode":
+                {
+                    "label": "Remove Additive GCode",
+                    "description": "Remove additive GCode instructions",
                     "type": "bool",
                     "default_value": "False"
-                },
-                "AdditiveFeedrate":
-                {
-                    "label": "Extra Shell Feedrate (mm/min)",
-                    "description": "Feedrate for the Extra Shell",
-                    "type": "int",
-                    "default_value": "3000"
                 }
             }
         }"""
+
+    def getLatestZ(self, data):
+        final_z = None
+        for line in data.splitlines():
+            if "G" in line and "Z" in line:
+                final_z = float(line.split("Z")[1])
+        return final_z
 
     def execute(self, data):
         global debug
@@ -252,7 +225,7 @@ class ASMBL_Processing(Script):
                 layer = Layer(data[i])
 
                 buffer_distance = self.getSettingValueByKey("SubtractivePerimeter")
-                add_instructions,sub_instructions = layer.expand(buffer_distance)
+                #add_instructions,sub_instructions = layer.expand(buffer_distance)
 
                 #Logger.log("d", "Sub instructions (execute!) = " + str(sub_instructions))
 
@@ -266,34 +239,73 @@ class ASMBL_Processing(Script):
 
                 new_instructions = ""
 
-                if self.getSettingValueByKey("AdditiveEnabled"):
-                    new_instructions += ";VESUVIUS EXTRA WALL\n"
-                    new_instructions += "G1 F"+str(self.getSettingValueByKey("AdditiveFeedrate"))+"\n"
+                if self.getSettingValueByKey("BurnishingEnabled"):
 
-                    for ins in add_instructions:
-                        new_instructions += ins
+                    new_instructions += "; Vesuvius Burnish\n"
 
-                    new_instructions += ";END OF VESUVIUS EXTRA WALL\n"
+                    new_instructions += "M109 S"+str(self.getSettingValueByKey("BurnishingTemperature"))+"\n"
+                    new_instructions += "G0 F"+str(self.getSettingValueByKey("BurnishingFeedrate"))+"\n"
+
+                    total_offset = (0.5 * self.getSettingValueByKey("BurnishingDiameter")) + self.getSettingValueByKey("BurnishingOffset")
+
+                    burnish_instructions = layer.expand(total_offset, extrude = False)
+
+                    current_z = self.getLatestZ(data[i])
+                    if current_z == None:
+                        continue
+                    
+                    layerHeight = Application.getInstance().getGlobalContainerStack().getProperty("layer_height", "value")
+                    
+                    z_step = self.getSettingValueByKey("BurnishingStepHeight")
+
+                    z = current_z
+
+                    while z < current_z + layerHeight:
+
+                        for ins in burnish_instructions:
+                            new_instructions += ins
+
+                        z += z_step
+                        new_instructions += "G0 F600 Z"+str(z)+"\n"
+                        new_instructions += "G0 F"+str(self.getSettingValueByKey("BurnishingFeedrate"))+"\n"
+
+                    new_instructions += "G0 F600 Z"+str(current_z)+"\n"
+
+                    new_instructions += "; Vesuvius Burnish Finished\n"
+                        
+
+
+#                if self.getSettingValueByKey("AdditiveEnabled"):
+#                    new_instructions += ";VESUVIUS EXTRA WALL\n"
+#                    new_instructions += "G1 F"+str(self.getSettingValueByKey("AdditiveFeedrate"))+"\n"
+
+#                    for ins in add_instructions:
+#                        new_instructions += ins
+
+#                    new_instructions += ";END OF VESUVIUS EXTRA WALL\n"
                 
 
-                if self.getSettingValueByKey("SubtractiveEnabled"):
-                    new_instructions += ";VESUVIUS SUBTRACTIVE\n"
-                    new_instructions += "G92 E0\n"
-                    new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E-"+str(self.getSettingValueByKey("Retraction"))+"\n"
-                    new_instructions += "G92 E0\n"
-                    new_instructions += "G0 F15000\n"
-                    new_instructions += "T1\n"
-                    new_instructions += "G1 F"+str(self.getSettingValueByKey("SubtractiveFeedrate"))+"\n"              
+#                if self.getSettingValueByKey("SubtractiveEnabled"):
+#                    new_instructions += ";VESUVIUS SUBTRACTIVE\n"
+#                    new_instructions += "G92 E0\n"
+#                    new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E-"+str(self.getSettingValueByKey("Retraction"))+"\n"
+#                    new_instructions += "G92 E0\n"
+#                    new_instructions += "G0 F15000\n"
+#                    new_instructions += "T1\n"
+#                    new_instructions += "G1 F"+str(self.getSettingValueByKey("SubtractiveFeedrate"))+"\n"              
 
-                    for ins in sub_instructions:
-                        new_instructions += ins
+#                    for ins in sub_instructions:
+#                        new_instructions += ins
 
-                    new_instructions += "T0;END OF VESUVIUS SUBTRACTIVE\n"
-                    new_instructions += "G92 E0\n"
-                    new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E"+str(self.getSettingValueByKey("Retraction"))+"\n"          
-                    new_instructions += "G92 E0\n"
+#                    new_instructions += "T0;END OF VESUVIUS SUBTRACTIVE\n"
+#                    new_instructions += "G92 E0\n"
+#                    new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E"+str(self.getSettingValueByKey("Retraction"))+"\n"          
+#                    new_instructions += "G92 E0\n"
 
-                data[i] += new_instructions
+                if self.getSettingValueByKey("RemovePrintCode"):
+                    data[i] = new_instructions
+                else:
+                    data[i] += new_instructions
 
         except Exception as e:
             Message(traceback.format_exc(), title = "Exception").show()
@@ -336,3 +348,53 @@ class ASMBL_Processing(Script):
 #                except:
 #                    Message(traceback.format_exc(), title = "Plot Exception").show()
         #END OF DEBUGGING
+
+#"SubtractiveEnabled":
+#                {
+#                    "label": "Generate Subtractive Toolpath",
+#                    "description": "When enabled, a toolpath for the subtractive tool is generated",
+#                    "type": "bool",
+#                    "default_value": "False"
+#                },
+#                "SubtractivePerimeter":
+#                {
+#                    "label": "Subtractive Tool Distance (mm)",
+#                    "description": "Distance the subtractive tool shall maintain from the model",
+#                    "type": "float",
+#                    "default_value": "3.5"
+#                },
+#                "SubtractiveFeedrate":
+#                {
+#                    "label": "Subtractive Feed Rate (mm/min)",
+#                    "description": "Feedrate for the Subtractive Tool",
+#                    "type": "int",
+#                    "default_value": "3000"
+#                },
+#                "Retraction":
+#                {
+#                    "label": "Retraction Distance",
+#                    "description": "Amount to retract when subtractive tool takes over",
+#                    "type": "float",
+#                    "default_value": "6.5"
+#                },
+#               "RetractionFeedrate":
+#                {
+#                    "label": "Retraction Feedrate (mm/min)",
+#                    "description": "Feedrate during retraction",
+#                    "type": "int",
+#                    "default_value": "1200"
+#                },
+#                "AdditiveEnabled":
+#                {
+#                    "label": "Generate Extra Outer Shell",
+#                    "description": "When enabled, an additional shell will be deposited on the outside of the model",
+#                    "type": "bool",
+#                    "default_value": "False"
+#                },
+#                "AdditiveFeedrate":
+#                {
+#                    "label": "Extra Shell Feedrate (mm/min)",
+#                    "description": "Feedrate for the Extra Shell",
+#                    "type": "int",
+#                    "default_value": "3000"
+#                }
