@@ -1,6 +1,3 @@
-# Copyright (c) 2017 Ruben Dulek
-# The PostProcessingPlugin is released under the terms of the AGPLv3 or higher.
-
 import traceback
 
 from ..Script import Script
@@ -10,16 +7,8 @@ from UM.Logger import Logger
 from UM.Application import Application
 
 from shapely import geometry
-#from shapely.ops import unary_union
-
-#import numpy as np
-
-#import matplotlib.pyplot as plt
-#import geopandas as gpd
-
 
 debug_layer_count = 0
-
 class MoveInstruction:
     def __init__(self, instruction):
 
@@ -35,13 +24,14 @@ class MoveInstruction:
                 self.f = float(arg.split("F")[1])
 
 class Layer:
-
+    """This class represents a layer which has been sliced."""
     def __init__(self, layer_instructions):
         self.polygons = []
         self.extractGCodeLayer(layer_instructions)
         self.original_gcode = layer_instructions.splitlines()
 
     def extractGCodeLayer(self, gcode):
+        """This method parses the GCode for an entire layer and extracts the exterior geometry of the layer. The geometry data is parsed into Shapely Polygon objects"""
         gcode_lines = gcode.splitlines()
 
         while ";TYPE:WALL-OUTER" in gcode_lines:
@@ -68,7 +58,7 @@ class Layer:
             
             del gcode_lines[start_index]
 
-    def coords_to_instructions(self,coordinate_sets, extrude = True):
+    def coords_to_instructions(self,coordinate_sets):
         #Coordinate sets: 2d tuple of coordinates, representing different 'islands' of geometry
         instructions = []
         for i in range(0,len(coordinate_sets)):
@@ -78,33 +68,16 @@ class Layer:
 
                 dp = 5
 
-                if extrude and j > 1:
-                    E = 0
-
-                    layerHeight = Application.getInstance().getGlobalContainerStack().getProperty("layer_height", "value")
-                    extruderDiameter = Application.getInstance().getGlobalContainerStack().getProperty("machine_nozzle_size", "value")
-
-                    dx = coordinate_sets[i][j][0] - coordinate_sets[i][j-1][0]
-                    dy = coordinate_sets[i][j][1] - coordinate_sets[i][j-1][1]
-
-                    distance = (dx)**2 + (dy**2)**0.5
-
-                    E = (4 * layerHeight * distance) / (3.1415 * extruderDiameter) #SOURCE https://3dprinting.stackexchange.com/questions/6289/how-is-the-e-argument-calculated-for-a-given-g1-command
-
-                    ins = "G1 X" + str(round(coordinate[0],dp)) + " Y" + str(round(coordinate[1],dp)) + " E" + str(round(E,dp)) + "\n"
-                else:
-                    ins = "G1 X" + str(round(coordinate[0],dp)) + " Y" + str(round(coordinate[1],dp)) + "\n"
+                ins = "G1 X" + str(round(coordinate[0],dp)) + " Y" + str(round(coordinate[1],dp)) + "\n"
+                
                 instructions.append(ins)
 
         return instructions
 
-    def expand(self, distance, extrude=False):
+    def expand(self, distance):
         global debug_layer_count
 
-        #lineWidth = Application.getInstance().getGlobalContainerStack().getProperty("line_width", "value")
-        
         coordinates_set = []
-
         
         for polygon in self.polygons:
             buff_polygon = polygon.buffer(float(distance))
@@ -116,22 +89,43 @@ class Layer:
             else:
                 buff_coords = list(buff_polygon.exterior.coords)
 
+#            #Visualisation Code
+#            debug_layer_count += 1
+#            if debug_layer_count == 3:
+#                try:
+#                    fig, axs1 = plt.subplots(1,1)
+
+#                    axs1.title.set_text("Geometry Buffering")
+
+#                    p = gpd.GeoSeries(buff_polygon)
+#                    p.plot(facecolor='skyblue', edgecolor='black',ax=axs1)
+#                    plt.show()
+#                    p2 = gpd.GeoSeries(polygon)
+#                    p2.plot(facecolor='navajowhite', edgecolor='black',ax=axs1)
+#                    plt.show()
+            
+#                except:
+#                        Message(traceback.format_exc(), title = "Plot Exception").show()
+            #End of Visualisation Code
+
+
             coordinates_set.append(buff_coords)
 
+
             
-        instructions = self.coords_to_instructions(coordinates_set,extrude)
+        instructions = self.coords_to_instructions(coordinates_set)
 
         return instructions
 
 
 class ASMBL_Processing(Script):
-    """Enables Vesuvius' IDEX capabilities to use ASMBL
-    """
+    """The ASMBL_Processing class is the main-class of the plugin. This class is instantiated when the post-processing plugin is executed."""
 
     def __init__(self) -> None:
         super().__init__()
 
     def getSettingDataString(self):
+        """Returns a JSON string, defining the settings information for the plugin."""
         return """{
             "name": "ASMBL Vesuvius",
             "key": "Vesuvius",
@@ -194,18 +188,12 @@ class ASMBL_Processing(Script):
                     "description": "Step Height of the burnishing tool",
                     "type": "float",
                     "default_value": "1"
-                },
-                "RemovePrintCode":
-                {
-                    "label": "Remove Additive GCode",
-                    "description": "Remove additive GCode instructions",
-                    "type": "bool",
-                    "default_value": "False"
                 }
             }
         }"""
 
     def getLatestZ(self, data):
+        """A utility function, which scans input GCode for the latest Z position and returns it."""
         final_z = None
         for line in data.splitlines():
             if "G" in line and "Z" in line:
@@ -213,10 +201,7 @@ class ASMBL_Processing(Script):
         return final_z
 
     def execute(self, data):
-        global debug
-        global debug_layer
-        debug = self.getSettingValueByKey("DebugEnabled")
-        debug_layer = self.getSettingValueByKey("DebugLayer")
+        """The entry point of the plugin"""
         
         layer_no = 0
         try:
@@ -224,15 +209,12 @@ class ASMBL_Processing(Script):
                 layer_no += 1
                 layer = Layer(data[i])
 
-                buffer_distance = self.getSettingValueByKey("SubtractivePerimeter")
-                #add_instructions,sub_instructions = layer.expand(buffer_distance)
-
-                #Logger.log("d", "Sub instructions (execute!) = " + str(sub_instructions))
-
                 Logger.log("d",self.getSettingValueByKey("ASMBL_Start"))
 
 
                 if layer_no <= int(self.getSettingValueByKey("ASMBL_Start")):
+                    if self.getSettingValueByKey("RemovePrintCode"):
+                        data[i] = ";Removed Layer: "+str(layer_no)+"\n"
                     if layer_no == self.getSettingValueByKey("ASMBL_Start") and self.getSettingValueByKey("PauseAtASMBL_Start"): 
                         data[i] += "\nM601 ; Pause at ASMBL Start\n"
                     continue
@@ -242,18 +224,26 @@ class ASMBL_Processing(Script):
                 if self.getSettingValueByKey("BurnishingEnabled"):
 
                     new_instructions += "; Vesuvius Burnish\n"
+                    new_instructions += "; Offset = "+str(self.getSettingValueByKey("BurnishingOffset"))+"\n"
+                    new_instructions += "; Feed Rate = "+str(self.getSettingValueByKey("BurnishingFeedrate"))+"\n"
+                    new_instructions += "; Step Height = "+str(self.getSettingValueByKey("BurnishingStepHeight"))+"\n"
+                    new_instructions += "; Temperature = "+str(self.getSettingValueByKey("BurnishingTemperature"))+"\n"
+                    new_instructions += "; Tool Diameter = "+str(self.getSettingValueByKey("BurnishingDiameter"))+"\n"
+
+                    new_instructions += "T1\n"
 
                     new_instructions += "M109 S"+str(self.getSettingValueByKey("BurnishingTemperature"))+"\n"
                     new_instructions += "G0 F"+str(self.getSettingValueByKey("BurnishingFeedrate"))+"\n"
 
-                    total_offset = (0.5 * self.getSettingValueByKey("BurnishingDiameter")) + self.getSettingValueByKey("BurnishingOffset")
+                    line_width = Application.getInstance().getGlobalContainerStack().getProperty("line_width", "value")
+                    total_offset = (0.5 * (self.getSettingValueByKey("BurnishingDiameter") + line_width)) + self.getSettingValueByKey("BurnishingOffset")
 
-                    burnish_instructions = layer.expand(total_offset, extrude = False)
+                    burnish_instructions = layer.expand(total_offset)
 
                     current_z = self.getLatestZ(data[i])
                     if current_z == None:
                         continue
-                    
+
                     layerHeight = Application.getInstance().getGlobalContainerStack().getProperty("layer_height", "value")
                     
                     z_step = self.getSettingValueByKey("BurnishingStepHeight")
@@ -262,50 +252,27 @@ class ASMBL_Processing(Script):
 
                     while z < current_z + layerHeight:
 
+                        new_instructions += "G0 F600 Z"+str(z)+"\n"
+
+                        new_instructions += "G0 F4000\n"
+                        new_instructions += burnish_instructions[0]
+
+                        new_instructions += "G0 F"+str(self.getSettingValueByKey("BurnishingFeedrate"))+"\n"
+
                         for ins in burnish_instructions:
                             new_instructions += ins
 
                         z += z_step
-                        new_instructions += "G0 F600 Z"+str(z)+"\n"
-                        new_instructions += "G0 F"+str(self.getSettingValueByKey("BurnishingFeedrate"))+"\n"
 
                     new_instructions += "G0 F600 Z"+str(current_z)+"\n"
 
+                    new_instructions += "T0\n"
                     new_instructions += "; Vesuvius Burnish Finished\n"
-                        
 
-
-#                if self.getSettingValueByKey("AdditiveEnabled"):
-#                    new_instructions += ";VESUVIUS EXTRA WALL\n"
-#                    new_instructions += "G1 F"+str(self.getSettingValueByKey("AdditiveFeedrate"))+"\n"
-
-#                    for ins in add_instructions:
-#                        new_instructions += ins
-
-#                    new_instructions += ";END OF VESUVIUS EXTRA WALL\n"
-                
-
-#                if self.getSettingValueByKey("SubtractiveEnabled"):
-#                    new_instructions += ";VESUVIUS SUBTRACTIVE\n"
-#                    new_instructions += "G92 E0\n"
-#                    new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E-"+str(self.getSettingValueByKey("Retraction"))+"\n"
-#                    new_instructions += "G92 E0\n"
-#                    new_instructions += "G0 F15000\n"
-#                    new_instructions += "T1\n"
-#                    new_instructions += "G1 F"+str(self.getSettingValueByKey("SubtractiveFeedrate"))+"\n"              
-
-#                    for ins in sub_instructions:
-#                        new_instructions += ins
-
-#                    new_instructions += "T0;END OF VESUVIUS SUBTRACTIVE\n"
-#                    new_instructions += "G92 E0\n"
-#                    new_instructions += "G1 F"+str(self.getSettingValueByKey("RetractionFeedrate"))+" E"+str(self.getSettingValueByKey("Retraction"))+"\n"          
-#                    new_instructions += "G92 E0\n"
-
-                if self.getSettingValueByKey("RemovePrintCode"):
-                    data[i] = new_instructions
-                else:
-                    data[i] += new_instructions
+                    if self.getSettingValueByKey("RemovePrintCode"):
+                        data[i] = new_instructions
+                    else:
+                        data[i] += new_instructions                  
 
         except Exception as e:
             Message(traceback.format_exc(), title = "Exception").show()
@@ -314,87 +281,3 @@ class ASMBL_Processing(Script):
         Message("ASMBL Processing Complete", title = "Status").show()
 
         return data
-
-
-#
-#for polygon in self.polygons:
-#            subtractive_polys.append(polygon.buffer(distance))
-#            additive_polys.append(polygon.buffer(lineWidth))
-#            
-#
-#        #DEBUGGING!
-#        if debug:
-#            debug_layer_count += 1#
-
-#            if debug_layer_count == debug_layer:
-#                try:
-#                    fig, (axs1,axs2) = plt.subplots(1,2)
-
-#                    axs1.title.set_text("Polygon Original")
-#                    axs2.title.set_text("Polygon Buffered")
-
-#                    #axs1.title.set_x("mm")
-#                    #axs1.title.set_y("mm")
-
-#                    #axs2.title.set_x("mm")
-#                    #axs2.title.set_y("mm")
-
-#                    p = gpd.GeoSeries(unary_union(self.polygons))
-#                    p.plot(ax=axs1)
-#                    plt.show()
-#                    p = gpd.GeoSeries(unary_union(subtractive_polys))
-#                    p.plot(ax=axs2)
-#                    plt.show()
-#                except:
-#                    Message(traceback.format_exc(), title = "Plot Exception").show()
-        #END OF DEBUGGING
-
-#"SubtractiveEnabled":
-#                {
-#                    "label": "Generate Subtractive Toolpath",
-#                    "description": "When enabled, a toolpath for the subtractive tool is generated",
-#                    "type": "bool",
-#                    "default_value": "False"
-#                },
-#                "SubtractivePerimeter":
-#                {
-#                    "label": "Subtractive Tool Distance (mm)",
-#                    "description": "Distance the subtractive tool shall maintain from the model",
-#                    "type": "float",
-#                    "default_value": "3.5"
-#                },
-#                "SubtractiveFeedrate":
-#                {
-#                    "label": "Subtractive Feed Rate (mm/min)",
-#                    "description": "Feedrate for the Subtractive Tool",
-#                    "type": "int",
-#                    "default_value": "3000"
-#                },
-#                "Retraction":
-#                {
-#                    "label": "Retraction Distance",
-#                    "description": "Amount to retract when subtractive tool takes over",
-#                    "type": "float",
-#                    "default_value": "6.5"
-#                },
-#               "RetractionFeedrate":
-#                {
-#                    "label": "Retraction Feedrate (mm/min)",
-#                    "description": "Feedrate during retraction",
-#                    "type": "int",
-#                    "default_value": "1200"
-#                },
-#                "AdditiveEnabled":
-#                {
-#                    "label": "Generate Extra Outer Shell",
-#                    "description": "When enabled, an additional shell will be deposited on the outside of the model",
-#                    "type": "bool",
-#                    "default_value": "False"
-#                },
-#                "AdditiveFeedrate":
-#                {
-#                    "label": "Extra Shell Feedrate (mm/min)",
-#                    "description": "Feedrate for the Extra Shell",
-#                    "type": "int",
-#                    "default_value": "3000"
-#                }
